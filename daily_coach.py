@@ -17,7 +17,7 @@ from google import genai
 from google.genai import types
 from mcp import ClientSession
 from mcp.client.sse import sse_client
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 # ---------------------------------------------------------------------------
 # CONFIGURACION
