@@ -1,0 +1,40 @@
+# Guardar en el repo como: .github/workflows/daily-coach.yml
+
+name: Coach diario Garmin
+
+on:
+  schedule:
+    # GitHub Actions usa SIEMPRE UTC (no entiende de husos horarios).
+    #
+    #   VERANO  (finales marzo -> finales octubre):  "0 5 * * *" = 07:00 Madrid
+    #   INVIERNO(finales octubre -> finales marzo):  "0 6 * * *" = 07:00 Madrid
+    #
+    # Ahora mismo (septiembre) estamos en VERANO -> se usa 5.
+    # A finales de octubre, cambia el 5 por un 6.
+    - cron: "0 5 * * *"
+  workflow_dispatch:        # permite lanzarlo a mano desde la pestana Actions
+
+jobs:
+  informe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: pip install google-genai mcp requests
+
+      - name: Generar y enviar el informe
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FITMCP_URL: ${{ secrets.FITMCP_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python daily_coach.py
