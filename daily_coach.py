@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""
 Coach diario de Garmin - version gratuita
 -----------------------------------------
 Gemini (free tier) + FitMCP (remoto) + Telegram.
