@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
 Coach diario de Garmin - version gratuita
-Gemini (free tier) + FitMCP (remoto, transporte SSE) + Telegram.
-Pensado para ejecutarse desde GitHub Actions, sin infraestructura propia.
+Gemini (free tier) + FitMCP (remoto) + Telegram.
+
+Prueba automaticamente los dos tipos de conexion MCP (SSE y HTTP)
+para no depender de adivinar cual usa FitMCP.
 """
 
 import os
@@ -15,6 +17,7 @@ from google import genai
 from google.genai import types
 from mcp import ClientSession
 from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamablehttp_client
 
 # ---------------------------------------------------------------------------
 # CONFIGURACION
@@ -22,11 +25,9 @@ from mcp.client.sse import sse_client
 
 MODEL = "gemini-2.5-flash"
 
-# El enlace privado de FitMCP ya lleva la credencial dentro de la propia URL.
-FITMCP_URL = os.environ["FITMCP_URL"]
+# .strip() elimina espacios o saltos de linea invisibles al copiar y pegar.
+FITMCP_URL = os.environ["FITMCP_URL"].strip()
 
-# El texto del entrenador se construye como lista de lineas.
-# Asi un fallo al copiar y pegar no rompe todo el programa.
 SYSTEM_PROMPT = "\n".join([
     "Eres el entrenador personal y analista de datos de Antonio.",
     "Cada manana analizas sus metricas de Garmin y le escribes un mensaje",
@@ -67,31 +68,62 @@ PROMPT = "\n".join([
 # LOGICA
 # ---------------------------------------------------------------------------
 
-async def generar_informe():
+async def preguntar_a_gemini(sesion):
     cliente = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    await sesion.initialize()
 
+    herramientas = await sesion.list_tools()
+    print("Herramientas de FitMCP disponibles:")
+    for t in herramientas.tools:
+        print("  - " + t.name)
+
+    respuesta = await cliente.aio.models.generate_content(
+        model=MODEL,
+        contents=PROMPT,
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            tools=[sesion],
+            temperature=0.4,
+        ),
+    )
+    texto = (respuesta.text or "").strip()
+    return texto or "Sin resultado del modelo."
+
+
+async def intentar_sse():
     async with sse_client(FITMCP_URL, timeout=60) as (read, write):
         async with ClientSession(read, write) as sesion:
-            await sesion.initialize()
+            return await preguntar_a_gemini(sesion)
 
-            respuesta = await cliente.aio.models.generate_content(
-                model=MODEL,
-                contents=PROMPT,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    tools=[sesion],
-                    temperature=0.4,
-                ),
-            )
-            texto = (respuesta.text or "").strip()
-            return texto or "Sin resultado del modelo."
+
+async def intentar_http():
+    async with streamablehttp_client(FITMCP_URL) as (read, write, _):
+        async with ClientSession(read, write) as sesion:
+            return await preguntar_a_gemini(sesion)
+
+
+async def generar_informe():
+    errores = []
+
+    for nombre, funcion in [("SSE", intentar_sse), ("HTTP", intentar_http)]:
+        try:
+            print("Probando conexion por " + nombre + "...")
+            resultado = await funcion()
+            print("Conexion por " + nombre + " correcta.")
+            return resultado
+        except Exception as e:
+            aviso = nombre + " fallo: " + type(e).__name__ + ": " + str(e)
+            print(aviso)
+            errores.append(aviso)
+
+    raise RuntimeError("Los dos metodos fallaron.\n" + "\n".join(errores))
 
 
 def enviar_telegram(texto):
-    token = os.environ["TELEGRAM_BOT_TOKEN"]
+    token = os.environ["TELEGRAM_BOT_TOKEN"].strip()
     url = "https://api.telegram.org/bot" + token + "/sendMessage"
     datos = {
-        "chat_id": os.environ["TELEGRAM_CHAT_ID"],
+        "chat_id": os.environ["TELEGRAM_CHAT_ID"].strip(),
         "text": texto,
         "disable_web_page_preview": True,
     }
@@ -108,6 +140,7 @@ def main():
             + type(e).__name__ + ": " + str(e)
         )
 
+    print("---- INFORME ----")
     print(informe)
 
     if "--dry-run" in sys.argv:
@@ -115,6 +148,7 @@ def main():
 
     try:
         enviar_telegram(informe)
+        print("Enviado por Telegram correctamente.")
     except Exception as e:
         print("Fallo al enviar por Telegram: " + str(e))
         sys.exit(1)
