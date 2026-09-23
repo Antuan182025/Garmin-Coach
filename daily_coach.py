@@ -3,7 +3,7 @@
 Coach diario de Garmin - version gratuita
 Gemini (free tier) + FitMCP (remoto) + Telegram.
 
-Prueba automaticamente los dos tipos de conexion MCP (SSE y HTTP)
+Prueba automaticamente los tipos de conexion MCP disponibles,
 para no depender de adivinar cual usa FitMCP.
 """
 
@@ -17,7 +17,17 @@ from google import genai
 from google.genai import types
 from mcp import ClientSession
 from mcp.client.sse import sse_client
-from mcp.client.streamable_http import streamable_http_client
+
+# El nombre de la funcion de HTTP ha cambiado entre versiones de la libreria.
+# Probamos los dos nombres posibles y guardamos el que exista.
+cliente_http = None
+try:
+    from mcp.client.streamable_http import streamable_http_client as cliente_http
+except ImportError:
+    try:
+        from mcp.client.streamable_http import streamablehttp_client as cliente_http
+    except ImportError:
+        cliente_http = None
 
 # ---------------------------------------------------------------------------
 # CONFIGURACION
@@ -97,7 +107,12 @@ async def intentar_sse():
 
 
 async def intentar_http():
-    async with streamablehttp_client(FITMCP_URL) as (read, write, _):
+    if cliente_http is None:
+        raise RuntimeError("La libreria no ofrece cliente HTTP en esta version.")
+
+    async with cliente_http(FITMCP_URL) as conexion:
+        # Segun la version, devuelve 2 o 3 valores.
+        read, write = conexion[0], conexion[1]
         async with ClientSession(read, write) as sesion:
             return await preguntar_a_gemini(sesion)
 
